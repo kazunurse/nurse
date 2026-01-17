@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>なーすまつり Discordサーバー構築・運用ガイド</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- Chosen Palette: Warm Neutrals with Medical/Clean Accents (Teal/Pink) -->
+    <!-- Application Structure Plan:
+        1. Dashboard Header: Introduction and core purpose.
+        2. Role Simulator (Interactive): Users select a role (Admin, Exec, General) to see their specific permissions and duties. This simplifies the complex matrix into a user-centric view.
+        3. Visual Server Map (Interactive Tree): A clickable directory structure representing Categories and Channels. Clicking a channel reveals details (Purpose, Permissions) in a side panel.
+        4. Operational Insights (Data Viz): A dashboard section using Chart.js to visualize the balance of the server (Public vs Private channels, Read vs Write permissions).
+        5. Guideline Accordion: Collapsible sections for operational rules to keep the UI clean.
+    -->
+    <!-- Visualization & Content Choices:
+        1. Role Simulator: Goal -> Personalize info. Method -> JS Object filtering. Interaction -> Dropdown selection updates DOM.
+        2. Server Map: Goal -> Navigation clarity. Method -> HTML/CSS Tree structure (nested divs with borders). Interaction -> Click to highlight and show details. NO SVG used.
+        3. Channel Distribution Chart: Goal -> Show server transparency balance. Method -> Chart.js Donut Chart. Interaction -> Hover for counts.
+        4. Guideline Accordion: Goal -> Digestible rules. Method -> JS toggle.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f8fafc; /* Slate 50 */
+            color: #334155; /* Slate 700 */
+        }
+        .tree-line {
+            position: relative;
+        }
+        .tree-line::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: -1rem;
+            border-left: 2px solid #e2e8f0;
+        }
+        .tree-item::before {
+            content: '';
+            position: absolute;
+            top: 1.5rem;
+            left: -1rem;
+            width: 1rem;
+            border-top: 2px solid #e2e8f0;
+        }
+        .active-channel {
+            background-color: #f0f9ff;
+            border-right: 4px solid #0ea5e9;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            height: 300px;
+        }
+        /* Custom scrollbar for channel list */
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <span class="text-2xl">🏥</span>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-800">なーすまつり</h1>
+                    <p class="text-xs text-slate-500">Discordサーバー構築・運用ガイド</p>
+                </div>
+            </div>
+            <nav class="hidden md:flex space-x-6">
+                <button onclick="scrollToSection('roles-section')" class="text-sm font-medium hover:text-teal-600 transition">役割・体制</button>
+                <button onclick="scrollToSection('structure-section')" class="text-sm font-medium hover:text-teal-600 transition">サーバー構成</button>
+                <button onclick="scrollToSection('guidelines-section')" class="text-sm font-medium hover:text-teal-600 transition">運用ルール</button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+
+        <!-- Intro -->
+        <div class="mb-12 text-center max-w-3xl mx-auto">
+            <h2 class="text-3xl font-bold text-slate-900 mb-4">運営＆コミュニティの円滑な連携へ</h2>
+            <p class="text-lg text-slate-600 leading-relaxed">
+                本アプリケーションは、「なーすまつり」Discordサーバーの全体像を可視化したものです。
+                役割ごとの権限範囲、チャンネルの目的、そして運用のルールをインタラクティブに確認できます。
+            </p>
+        </div>
+
+        <!-- Section 1: Team & Roles Simulator -->
+        <section id="roles-section" class="mb-16">
+            <div class="border-l-4 border-teal-500 pl-4 mb-6">
+                <h3 class="text-2xl font-bold text-slate-800">1. 役割シミュレーター</h3>
+                <p class="text-sm text-slate-500 mt-1">あなたの立場を選択して、権限とミッションを確認しましょう。</p>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg overflow-hidden grid grid-cols-1 md:grid-cols-3 gap-0">
+                <!-- Role Selector -->
+                <div class="p-6 bg-slate-50 border-b md:border-b-0 md:border-r border-slate-200">
+                    <label class="block text-sm font-medium text-slate-700 mb-2">表示する役割を選択</label>
+                    <div class="space-y-2">
+                        <button onclick="updateRoleView('admin')" id="btn-admin" class="role-btn w-full text-left px-4 py-3 rounded-lg border transition hover:bg-white hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-teal-50 border-teal-200 ring-2 ring-teal-500">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-teal-900">運営チーム (3名)</span>
+                                <span class="text-xs bg-teal-200 text-teal-800 px-2 py-1 rounded-full">管理者</span>
+                            </div>
+                        </button>
+                        <button onclick="updateRoleView('exec')" id="btn-exec" class="role-btn w-full text-left px-4 py-3 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold">実行委員 (10名)</span>
+                                <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">実務</span>
+                            </div>
+                        </button>
+                        <button onclick="updateRoleView('general')" id="btn-general" class="role-btn w-full text-left px-4 py-3 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition focus:outline-none focus:ring-2 focus:ring-green-500">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold">一般参加者</span>
+                                <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">ゲスト</span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Role Details -->
+                <div class="col-span-1 md:col-span-2 p-8 relative">
+                    <div id="role-content">
+                        <!-- Content injected via JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: Server Map & Channel Explorer -->
+        <section id="structure-section" class="mb-16">
+            <div class="flex flex-col md:flex-row justify-between items-end mb-6 border-l-4 border-blue-500 pl-4">
+                <div>
+                    <h3 class="text-2xl font-bold text-slate-800">2. サーバー構成マップ</h3>
+                    <p class="text-sm text-slate-500 mt-1">カテゴリーとチャンネルの構造、およびアクセス権限の分布。</p>
+                </div>
+                <!-- Stats Chart Container -->
+                 <div class="w-full md:w-auto mt-4 md:mt-0 flex items-center bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+                     <div class="text-xs font-semibold text-slate-500 mr-4">チャンネル種別割合</div>
+                     <div style="height: 60px; width: 60px;">
+                         <canvas id="miniStatsChart"></canvas>
+                     </div>
+                 </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
+                <!-- Interactive Tree -->
+                <div class="col-span-1 bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col">
+                    <div class="p-4 bg-slate-50 border-b border-slate-200 font-semibold text-slate-700 flex justify-between items-center">
+                        <span>チャンネル一覧</span>
+                        <span class="text-xs font-normal text-slate-400">クリックして詳細を表示</span>
+                    </div>
+                    <div class="overflow-y-auto flex-grow p-4 custom-scroll" id="channel-tree">
+                        <!-- Tree injected JS -->
+                    </div>
+                </div>
+
+                <!-- Detail Panel -->
+                <div class="col-span-1 lg:col-span-2 bg-white rounded-xl shadow-md border border-slate-200 p-8 flex flex-col justify-center items-center text-center relative overflow-hidden" id="channel-detail-panel">
+                    <div class="absolute top-0 left-0 w-full h-2 bg-slate-200" id="detail-header-bar"></div>
+                    <div id="detail-placeholder" class="text-slate-400">
+                        <span class="text-4xl block mb-2">👆</span>
+                        <p>左のリストからチャンネルを選択してください</p>
+                    </div>
+                    <div id="detail-content" class="hidden w-full text-left">
+                        <!-- Content injected JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 3: Permission Matrix Visualization -->
+        <section class="mb-16">
+            <div class="border-l-4 border-indigo-500 pl-4 mb-6">
+                <h3 class="text-2xl font-bold text-slate-800">3. 権限可視化（アクセス解析）</h3>
+                <p class="text-sm text-slate-500 mt-1">各ロールがどのエリアにアクセスできるかの分布状況。</p>
+            </div>
+            
+            <div class="bg-white rounded-xl shadow-lg p-6">
+                 <div class="chart-container">
+                    <canvas id="permissionChart"></canvas>
+                </div>
+                <div class="mt-4 text-center text-sm text-slate-500">
+                    <p>※ 全体のアクティビティレベルと透明性のバランスを示しています。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 4: Operational Guidelines -->
+        <section id="guidelines-section" class="mb-24">
+            <div class="border-l-4 border-rose-500 pl-4 mb-6">
+                <h3 class="text-2xl font-bold text-slate-800">4. 運用ガイドライン</h3>
+                <p class="text-sm text-slate-500 mt-1">健全なコミュニティ運営のための重要ルール。</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Card 1 -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+                    <div class="flex items-start mb-4">
+                        <div class="bg-indigo-100 text-indigo-600 p-3 rounded-lg mr-4">
+                            <span class="text-xl">🧵</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-lg text-slate-800">スレッド活用の徹底</h4>
+                            <p class="text-sm text-slate-500 mt-1">情報の埋没を防ぐためのルール</p>
+                        </div>
+                    </div>
+                    <ul class="space-y-2 text-sm text-slate-600 list-disc list-inside bg-slate-50 p-4 rounded-lg">
+                        <li>特定の話題（タスク相談、会議議題）は必ずスレッドを作成</li>
+                        <li>スレッドには分かりやすいタイトルを付ける</li>
+                        <li>メインのタイムラインは「見出し」として使う</li>
+                    </ul>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+                    <div class="flex items-start mb-4">
+                        <div class="bg-emerald-100 text-emerald-600 p-3 rounded-lg mr-4">
+                            <span class="text-xl">👍</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-lg text-slate-800">リンクとリアクション</h4>
+                            <p class="text-sm text-slate-500 mt-1">効率的なコミュニケーション</p>
+                        </div>
+                    </div>
+                    <ul class="space-y-2 text-sm text-slate-600 list-disc list-inside bg-slate-50 p-4 rounded-lg">
+                        <li>資料URL共有時の説明文は最小限にする</li>
+                        <li>「了解」などはスタンプ（✅）で済ませる</li>
+                        <li>チャットログを流さない工夫をする</li>
+                    </ul>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+                    <div class="flex items-start mb-4">
+                        <div class="bg-pink-100 text-pink-600 p-3 rounded-lg mr-4">
+                            <span class="text-xl">📸</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-lg text-slate-800">写真とSNS</h4>
+                            <p class="text-sm text-slate-500 mt-1">プライバシーと広報のバランス</p>
+                        </div>
+                    </div>
+                    <div class="bg-pink-50 border border-pink-100 p-4 rounded-lg text-sm text-pink-800">
+                        <p class="font-semibold mb-2">基本ルール: SNS投稿OK</p>
+                        <p>「イベントの風景」チャンネルの写真はSNS利用に同意したものとみなします。ただし、人物が写る場合は事前の許可取りを必須とします。</p>
+                    </div>
+                </div>
+
+                <!-- Card 4 -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+                    <div class="flex items-start mb-4">
+                        <div class="bg-amber-100 text-amber-600 p-3 rounded-lg mr-4">
+                            <span class="text-xl">⚖️</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-lg text-slate-800">透明性と機密性</h4>
+                            <p class="text-sm text-slate-500 mt-1">オープンな運営のために</p>
+                        </div>
+                    </div>
+                    <ul class="space-y-2 text-sm text-slate-600 bg-slate-50 p-4 rounded-lg">
+                        <li class="flex items-center"><span class="text-green-500 mr-2">●</span> 議論は可能な限り「🔓公開実行委員」で</li>
+                        <li class="flex items-center"><span class="text-red-500 mr-2">●</span> 個人情報・予算・戦略は「🔒運営メンバー」で</li>
+                        <li class="text-xs text-slate-500 mt-2 ml-4">参加者に熱量を伝えるため、プロセスを見せる意識を持つ</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="bg-slate-800 text-slate-400 py-8 text-center">
+        <p class="mb-2">なーすまつり 運営事務局</p>
+        <p class="text-xs">© 2026 Naasu Matsuri Discord Guide</p>
+    </footer>
+
+    <script>
+        // --- Data Definitions ---
+        const roleData = {
+            admin: {
+                title: "運営チーム",
+                count: "3名",
+                members: ["西山妙子", "篠崎優子", "看護師ママ🌟ほっしー"],
+                color: "teal",
+                desc: "サーバー全域の管理、機密情報（戦略・予算）の取り扱い、最終決定事項の告知。",
+                access: "全チャンネルの閲覧・投稿・設定変更",
+                badge: "管理者"
+            },
+            exec: {
+                title: "実行委員",
+                count: "10名",
+                members: ["Katsurada Kazuto", "katayama", "いっちー", "ベッカミ", "浦田克美", "砂田将弥", "運営チーム3名"],
+                color: "blue",
+                desc: "イベント実務（タスク遂行）、議事録作成、制作プロセスの公開（盛り上げ）。",
+                access: "実務チャンネル投稿、公開実行委員チャンネル投稿",
+                badge: "実務リーダー"
+            },
+            general: {
+                title: "一般参加者",
+                count: "多数",
+                members: ["看護学生", "看護師", "ボランティア", "ゲスト"],
+                color: "green",
+                desc: "イベントへの参加、情報の受信、コミュニティでの交流。",
+                access: "交流チャンネル投稿、公開情報閲覧のみ",
+                badge: "ゲスト"
+            }
+        };
+
+        const serverStructure = [
+            {
+                id: "cat1",
+                name: "📌 はじめに（総合案内）",
+                desc: "参加者が最初に目にする基盤エリア",
+                channels: [
+                    { name: "📌｜ディスコードの使用ルール", type: "read", access: "all", desc: "ガイドライン、スレッド推奨、スタンプ反応のルールを掲載。", restricted: false },
+                    { name: "🛠️｜操作ガイド", type: "read", access: "all", desc: "Discord初心者向けの基本操作解説。", restricted: false }
+                ]
+            },
+            {
+                id: "cat2",
+                name: "💬 全体・交流",
+                desc: "参加者全員が活動するメインエリア",
+                channels: [
+                    { name: "📣｜お知らせ", type: "read-write-admin", access: "all", desc: "イベントの重要告知、公式アナウンス。（投稿は運営・実行委員のみ）", restricted: false },
+                    { name: "👋｜自己紹介チャンネル", type: "write", access: "all", desc: "新メンバーの挨拶。専用テンプレートをピン留め。", restricted: false },
+                    { name: "💬｜雑談", type: "write", access: "all", desc: "自由な交流、フリートーク。", restricted: false },
+                    { name: "📸｜イベントの風景", type: "write", access: "all", desc: "準備・当日の写真共有。SNS投稿同意チャンネル。", restricted: false },
+                    { name: "🤔｜質問・相談：初心者サポート", type: "write", access: "all", desc: "操作や参加方法に関するヘルプデスク。", restricted: false },
+                    { name: "💻｜議事録", type: "read-write-admin", access: "all", desc: "透明性維持のため、定例会議等のログを公開。（閲覧専用）", restricted: false }
+                ]
+            },
+            {
+                id: "cat3",
+                name: "👥 なーすまつり運営",
+                desc: "実務エリア（セキュリティ注意）",
+                channels: [
+                    { name: "🔒｜運営メンバー（西山…）", type: "private", access: "admin", desc: "【完全限定】戦略・予算等のコア意思決定。", restricted: true },
+                    { name: "🔓｜（誰でも閲覧可能）実行委員", type: "read-write-exec", access: "all", desc: "【プロセス公開】制作プロセスのライブ公開。（投稿は運営・実行委員のみ）", restricted: false },
+                    { name: "🔒📅｜スケジュール・タスク", type: "private", access: "exec", desc: "【実務限定】進捗報告、期限管理。", restricted: true },
+                    { name: "📝｜決定事項", type: "read-write-admin", access: "all", desc: "【アーカイブ】確定ルールのログ保管。（閲覧専用）", restricted: false }
+                ]
+            }
+        ];
+
+        // --- Functions ---
+
+        // 1. Role Simulator
+        function updateRoleView(roleKey) {
+            // Update buttons state
+            document.querySelectorAll('.role-btn').forEach(btn => {
+                btn.classList.remove('bg-teal-50', 'bg-blue-50', 'bg-green-50', 'ring-2', 'ring-teal-500', 'ring-blue-500', 'ring-green-500', 'border-teal-200', 'border-blue-200', 'border-green-200');
+                btn.classList.add('bg-white', 'border-slate-200');
+            });
+
+            const data = roleData[roleKey];
+            const btn = document.getElementById(`btn-${roleKey}`);
+            
+            // Add active styling based on role color
+            btn.classList.remove('bg-white', 'border-slate-200');
+            if(data.color === 'teal') {
+                btn.classList.add('bg-teal-50', 'border-teal-200', 'ring-2', 'ring-teal-500');
+            } else if(data.color === 'blue') {
+                btn.classList.add('bg-blue-50', 'border-blue-200', 'ring-2', 'ring-blue-500');
+            } else {
+                btn.classList.add('bg-green-50', 'border-green-200', 'ring-2', 'ring-green-500');
+            }
+
+            // Render Content
+            const container = document.getElementById('role-content');
+            container.innerHTML = `
+                <div class="animate-fade-in">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-3xl font-bold text-slate-800">${data.title}</h2>
+                        <span class="text-sm font-mono bg-slate-100 px-3 py-1 rounded text-slate-500">${data.count}</span>
+                    </div>
+                    <p class="text-lg text-slate-600 mb-6 border-l-4 border-${data.color}-400 pl-4">${data.desc}</p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-white p-5 rounded-lg border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-700 mb-2 flex items-center">
+                                <span class="mr-2">🔑</span> 権限・アクセス
+                            </h4>
+                            <p class="text-sm text-slate-600">${data.access}</p>
+                        </div>
+                        <div class="bg-white p-5 rounded-lg border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-700 mb-2 flex items-center">
+                                <span class="mr-2">👥</span> メンバー
+                            </h4>
+                            <div class="flex flex-wrap gap-2">
+                                ${data.members.map(m => `<span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">${m}</span>`).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 2. Server Tree Builder
+        function buildChannelTree() {
+            const container = document.getElementById('channel-tree');
+            let html = '';
+
+            serverStructure.forEach((cat, index) => {
+                html += `
+                    <div class="mb-4">
+                        <div class="flex items-center text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                            <span class="mr-2">📂</span> ${cat.name}
+                        </div>
+                        <div class="pl-2 border-l-2 border-slate-200 ml-1 space-y-1">
+                `;
+                
+                cat.channels.forEach((chan, cIndex) => {
+                    const icon = chan.restricted ? '🔒' : (chan.name.includes('📸') ? '📸' : (chan.name.includes('📣') ? '📣' : '#'));
+                    // Encode channel data into data attributes
+                    const dataStr = encodeURIComponent(JSON.stringify(chan));
+                    html += `
+                        <button onclick="showChannelDetail('${dataStr}', this)" class="channel-item w-full text-left px-3 py-2 rounded-md hover:bg-slate-100 transition flex items-center text-sm text-slate-600 group">
+                            <span class="mr-2 text-slate-400 group-hover:text-slate-600">${icon}</span>
+                            <span class="truncate">${chan.name.replace(/^[#🔒📣📸📌🛠️👋🤔💻📝🔓📅\s｜]+/, '')}</span>
+                            ${chan.restricted ? '<span class="ml-auto text-xs text-amber-500 bg-amber-50 px-1 rounded">Private</span>' : ''}
+                        </button>
+                    `;
+                });
+
+                html += `</div></div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // 3. Channel Detail Viewer
+        function showChannelDetail(dataStr, element) {
+            // Handle Active State
+            document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active-channel', 'text-teal-700', 'font-medium'));
+            element.classList.add('active-channel', 'text-teal-700', 'font-medium');
+
+            const data = JSON.parse(decodeURIComponent(dataStr));
+            const placeholder = document.getElementById('detail-placeholder');
+            const content = document.getElementById('detail-content');
+            const headerBar = document.getElementById('detail-header-bar');
+
+            placeholder.classList.add('hidden');
+            content.classList.remove('hidden');
+
+            // Color coding header
+            let headerColor = 'bg-teal-500';
+            if (data.restricted) headerColor = 'bg-rose-500'; // Private
+            else if (data.type.includes('read')) headerColor = 'bg-blue-400'; // Read only
+
+            headerBar.className = `absolute top-0 left-0 w-full h-2 ${headerColor}`;
+
+            // Permission Text Logic
+            let permText = "";
+            let permBadge = "";
+            
+            if (data.name.includes('🔒｜運営メンバー')) {
+                permText = "運営チーム（3名）のみが閲覧・投稿可能。";
+                permBadge = `<span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-xs font-bold">TOP SECRET</span>`;
+            } else if (data.name.includes('🔒📅')) {
+                permText = "運営チームと実行委員のみが閲覧・投稿可能。一般参加者からは見えません。";
+                permBadge = `<span class="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold">STAFF ONLY</span>`;
+            } else if (data.name.includes('🔓｜')) {
+                permText = "全員が閲覧可能。投稿は運営・実行委員のみ。";
+                permBadge = `<span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">PUBLIC VIEW</span>`;
+            } else if (data.type === 'read' || data.type === 'read-write-admin') {
+                permText = "全員が閲覧可能。投稿は運営側のみ。";
+                permBadge = `<span class="bg-slate-100 text-slate-700 px-2 py-1 rounded text-xs font-bold">READ ONLY</span>`;
+            } else {
+                permText = "全員が閲覧・投稿可能。";
+                permBadge = `<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">OPEN</span>`;
+            }
+
+            content.innerHTML = `
+                <div class="animate-fade-in">
+                    <div class="flex justify-between items-start mb-4">
+                        <h2 class="text-2xl font-bold text-slate-800 break-words w-3/4">${data.name}</h2>
+                        ${permBadge}
+                    </div>
+                    
+                    <div class="mb-6">
+                        <h5 class="text-xs font-bold text-slate-400 uppercase mb-1">目的・役割</h5>
+                        <p class="text-lg text-slate-700 leading-relaxed">${data.desc}</p>
+                    </div>
+
+                    <div class="bg-slate-50 rounded-lg p-4 border border-slate-100">
+                        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">アクセス権限</h5>
+                        <div class="flex items-start">
+                            <span class="text-lg mr-2">🔐</span>
+                            <p class="text-sm text-slate-600 mt-1">${permText}</p>
+                        </div>
+                    </div>
+
+                     <div class="mt-6 pt-6 border-t border-slate-100">
+                        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">推奨アクション</h5>
+                        <ul class="text-sm text-slate-600 space-y-2">
+                             ${data.name.includes('📸') ? '<li>✅ 写真を投稿する (SNS許可済)</li><li>✅ 素敵な写真にリアクションする</li>' : ''}
+                             ${data.name.includes('スレッド') ? '<li>✅ スレッドを作成して会話する</li>' : ''}
+                             ${data.restricted ? '<li>⚠️ 機密情報の扱いに注意する</li>' : ''}
+                             <li>✅ 絵文字スタンプで反応する</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 4. Charts Initialization
+        function initCharts() {
+            // Chart 1: Permission Matrix / Access Distribution
+            const ctx1 = document.getElementById('permissionChart').getContext('2d');
+            
+            // Data derived from the matrix in the prompt
+            // General: 5 read/write, 3 read only, 2 hidden
+            // Exec: 6 read/write, 3 read only, 1 hidden
+            // Admin: All read/write
+            
+            new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: ['一般参加者', '実行委員(10名)', '運営チーム(3名)'],
+                    datasets: [
+                        {
+                            label: '自由に投稿可能',
+                            data: [5, 7, 12], // Approximate counts based on matrix
+                            backgroundColor: '#4ade80', // green-400
+                        },
+                        {
+                            label: '閲覧のみ可能',
+                            data: [5, 2, 0], 
+                            backgroundColor: '#60a5fa', // blue-400
+                        },
+                        {
+                            label: 'アクセス不可 (非表示)',
+                            data: [2, 1, 0],
+                            backgroundColor: '#e2e8f0', // slate-200
+                        }
+                    ]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    responsive: true,
+                    scales: {
+                        x: { stacked: true, grid: { display: false } },
+                        y: { stacked: true, beginAtZero: true, max: 12 }
+                    },
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.raw + ' チャンネル';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Chart 2: Mini Stats (Donut) - Channel Type Breakdown
+            const ctx2 = document.getElementById('miniStatsChart').getContext('2d');
+            new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: ['公開 (Open)', '運営管理 (Admin/Info)', '非公開 (Private)'],
+                    datasets: [{
+                        data: [5, 5, 2], // 5 Open, 5 ReadOnly/AdminPost, 2 Private
+                        backgroundColor: ['#4ade80', '#60a5fa', '#f43f5e'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    responsive: true,
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: true }
+                    }
+                }
+            });
+        }
+
+        function scrollToSection(id) {
+            document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Initialization
+        window.addEventListener('DOMContentLoaded', () => {
+            updateRoleView('admin'); // Default view
+            buildChannelTree();
+            initCharts();
+        });
+
+    </script>
+</body>
+</html>
